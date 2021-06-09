@@ -36,7 +36,6 @@ public class SlidingWindowStreamingJobWithParallelism {
     private static final String region = "us-west-2";
     private static final String inputStreamName = "cdc-postgrey-test";
     private static final String outputStreamName = "cdc-test-output-stream";
-
     private static DataStream<String> createSourceFromStaticConfig(StreamExecutionEnvironment env) {
         Properties inputProperties = new Properties();
         inputProperties.setProperty(ConsumerConfigConstants.AWS_REGION, region);
@@ -57,33 +56,21 @@ public class SlidingWindowStreamingJobWithParallelism {
 
     public static void main(String[] args) throws Exception {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
         DataStream<String> input = createSourceFromStaticConfig(env);
         ObjectMapper jsonParser = new ObjectMapper();
         input.map(value -> { // Parse the JSON
             JsonNode jsonNode = jsonParser.readValue(value, JsonNode.class);
             return new Tuple2<>(jsonNode.get("user_id").asText(), jsonNode.get("time_spent").asDouble());
-        }).returns(Types.TUPLE(Types.STRING, Types.DOUBLE))
-                .keyBy(0) // Logically partition the stream per stock symbol
+        })
+                .returns(Types.TUPLE(Types.STRING, Types.DOUBLE))
+                .keyBy(value->value.f0) // Logically partition the stream per user_id
                 .timeWindow(Time.seconds(10), Time.seconds(5)) // Sliding window definition
-                .min(1) // Calculate minimum price per stock over the window
-                .setParallelism(3) // Set parallelism for the min operator
-                .map(value -> value.f0 + ":  - " + value.f1.toString() + "\n")
+                .min(1) // Calculate minimum time spent over question over the window
+                .setParallelism(2) // Set parallelism for the min operator
+                .map(value -> "chalo lets see " + value.f0 +" : " + value.f1.toString() + "\n")
+//                .reduce((value1, value2)->1.0)
                 .addSink(createSinkFromStaticConfig());
 
-
-//        input.map(value->{
-//            JsonNode jsonNode = jsonParser.readValue(value, JsonNode.class);
-//            return new Tuple2<>(jsonNode.get("user_id").asText(), jsonNode.get("time_spent").asDouble());
-//        }).returns(Types.TUPLE(Types.STRING, Types.DOUBLE))
-//                .keyBy(0)
-////                .keyBy(value -> value.user_id)
-//                .timeWindow(Time.seconds(200), Time.seconds(20))
-//                .sum(1)
-//                .map(value -> value.f0 +" : " + value.f1.toString() + "\n")
-////                .reduce(acc, value -> acc + value.time_spent)
-//                .addSink(createSinkFromStaticConfig());
-
-        env.execute("sum of time_spent");
+        env.execute("min of time_spent");
     }
 }
