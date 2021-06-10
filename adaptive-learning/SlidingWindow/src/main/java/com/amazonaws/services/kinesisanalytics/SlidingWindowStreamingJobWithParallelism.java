@@ -65,12 +65,10 @@ public class SlidingWindowStreamingJobWithParallelism {
                 .returns(Types.TUPLE(Types.STRING, Types.DOUBLE))
                 .keyBy(value->value.f0) // Logically partition the stream per user_id
                 .timeWindow(Time.seconds(10), Time.seconds(5)) // Sliding window definition
-                .min(1) // Calculate minimum time spent over question over the window
-                .setParallelism(2) // Set parallelism for the min operator
-                .map(value -> "chalo lets see " + value.f0 +" : " + value.f1.toString() + "\n")
-//                .reduce((value1, value2)->1.0)
+                .sum(1) // Calculate sum of time_taken per question over the window
+                .setParallelism(2) // Set parallelism for the sum operator
+                .map(value -> "sum of time_taken over a time window : " + value.f0 +" : " + value.f1.toString() + "\n")
                 .addSink(createSinkFromStaticConfig());
-
-        env.execute("min of time_spent");
+        env.execute("sum of time_spent");
     }
 }
