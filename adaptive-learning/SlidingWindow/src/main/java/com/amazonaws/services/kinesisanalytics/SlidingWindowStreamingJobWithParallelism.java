@@ -2,7 +2,7 @@ package com.amazonaws.services.kinesisanalytics;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.Types;
-import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,7 +13,9 @@ import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisProducer;
 import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConstants;
 import org.apache.flink.api.common.functions.AggregateFunction;
+import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import java.util.Properties;
+import java.util.HashMap;
 
 /**
  * A Kinesis Data Analytics for Java application that calculates average time per question and
@@ -61,60 +63,69 @@ public class SlidingWindowStreamingJobWithParallelism{
         ObjectMapper jsonParser = new ObjectMapper();
         input.map(value -> { // Parse the JSON
             JsonNode jsonNode = jsonParser.readValue(value, JsonNode.class);
-            return new Tuple3<>(jsonNode.get("user_id").asText(), jsonNode.get("time_spent").asDouble(), jsonNode.get("is_correct").asBoolean());
+            return new Tuple4<>(jsonNode.get("user_id").asText(), jsonNode.get("time_spent").asDouble(),
+                    jsonNode.get("is_correct").asBoolean(), jsonNode.get("user_playable_attempt_id").asText());
         })
-                .returns(Types.TUPLE(Types.STRING, Types.DOUBLE, Types.BOOLEAN))
+                .returns(Types.TUPLE(Types.STRING, Types.DOUBLE, Types.BOOLEAN, Types.STRING))
                 .keyBy(value->value.f0) // Logically partition the stream per user_id
-                .timeWindow(Time.seconds(10), Time.seconds(5)) // Sliding window definition
+                .timeWindow(Time.minutes(3), Time.seconds(10)) // Sliding window definition
                 .aggregate(new AverageAggregator())
-//                .print();
-                .setParallelism(1)
-                .map(value -> " CHECKING - " + value+ "\n")
+                .setParallelism(2)
+                .map(value -> " CHECKING 03 - " + value+ "\n")
                 .addSink(createSinkFromStaticConfig());
 
         env.execute("sum of time_spent");
     }
 
-    public static class AverageAggregator implements AggregateFunction<Tuple3<String, Double, Boolean>, MyAverage, Tuple2<MyAverage, Double>>{
+    public static class AverageAggregator implements AggregateFunction<Tuple4<String, Double, Boolean, String>, MyAverage, Tuple2<MyAverage, Double>>{
         @Override
         public MyAverage createAccumulator(){
             return new MyAverage();
         }
 
         @Override
-        public MyAverage add(Tuple3<String, Double, Boolean> in, MyAverage myAverage) {
-            myAverage.variant = in.f0;
-            myAverage.count = myAverage.count + 1;
-            myAverage.sum = myAverage.sum + in.f1;
+        public MyAverage add(Tuple4<String, Double, Boolean, String> in, MyAverage myAverage) {
+            myAverage.userId = in.f0;
+            myAverage.totalQuestions = myAverage.totalQuestions + 1;
+            myAverage.totalTime = myAverage.totalTime + in.f1;
+            myAverage.totalPlayableMap.put(in.f3,true);
+            if(in.f2) {
+                myAverage.correctQuestions = myAverage.correctQuestions + 1;
+            }
             return myAverage;
         }
 
         @Override
         public Tuple2<MyAverage, Double> getResult(MyAverage myAverage) {
-            return new Tuple2<>(myAverage, myAverage.sum / myAverage.count);
+            return new Tuple2<>(myAverage, myAverage.totalTime / myAverage.totalQuestions);
         }
 
         @Override
         public MyAverage merge(MyAverage myAverage, MyAverage acc1) {
-            myAverage.sum = myAverage.sum + acc1.sum;
-            myAverage.count = myAverage.count + acc1.count;
+            myAverage.totalTime = myAverage.totalTime + acc1.totalTime;
+            myAverage.totalQuestions = myAverage.totalQuestions + acc1.totalQuestions;
+            myAverage.correctQuestions = myAverage.correctQuestions + acc1.correctQuestions;
+            myAverage.totalPlayableMap.putAll(acc1.totalPlayableMap);
             return myAverage;
         }
     }
 
     public static class MyAverage {
 
-        public String variant;
-        public Integer count = 0;
-        public Double sum = 0d;
-
+        public String userId;
+        public Integer totalQuestions = 0;
+        public HashMap totalPlayableMap = new HashMap<String, Boolean>();
+        public Double totalTime = 0d;
+        public Integer correctQuestions=0;
         @Override
         public String toString() {
-            return "MyAverage{" +
-                    "variant='" + variant + '\'' +
-                    ", count=" + count +
-                    ", sum=" + sum +
-                    '}';
+            return "MyAverage {" +
+                    "userId='" + userId + '\'' +
+                    ", totalQuestions=" + totalQuestions +
+                    ", totalTime =" + totalTime +
+                    ", correctQuestions=" + correctQuestions +
+                    ", totalPlayableSolved = " + totalPlayableMap.size() +
+                    '} ';
         }
     }
 }
