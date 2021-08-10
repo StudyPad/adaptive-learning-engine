@@ -1,0 +1,15 @@
+{
+  "name": "scripts-redshift",
+  "version": "1.0.0",
+  "description": "",
+  "main": "aws.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.959.0",
+    "bluebird": "^3.7.2"
+  }
+}
